@@ -6,8 +6,8 @@ build:
 	go build -o iunzip iunzip.go
 
 test: build
-	./iunzip -path=test.zip
 	@echo "***** UNIT TESTS NOT YET PROVIDED *****"
+	./iunzip -path=test.zip
 
 clean:
 	rm -rf ./tmp/

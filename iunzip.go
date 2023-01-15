@@ -6,96 +6,91 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
-	fp "path/filepath"
+	fpath "path"
+	"sync"
 	"time"
 
 	"github.com/TwiN/go-color"
 )
 
 const (
-	TEMP_DIR     = "./tmp"
-	DELETE_TEMPS = false
-
-	MAX_STORAGE_USAGE_ALLOWED   = 2048
-	MAX_CPU_UTILIZATION_ALLOWED = 0.25
-	MAX_CONCURRENT_JOBS         = 3
+	TEMP_DIR            = "./tmp"
+	DELETE_TEMPS        = true
+	MAX_CONCURRENT_JOBS = 3
 )
 
 var (
-	q chan *WorkTask
+	q  chan *WorkTask
+	wg sync.WaitGroup
 )
 
 type WorkTask struct {
-	Filesize int
-	Filename string
-	Start    time.Time
-	End      time.Time
+	Fs int
+	Fn string
 }
 
-func checkCapacityAndSchedule(filesize int, filepath string) {
+func scheduleJob(filesize int, fp string) {
 
 	t := &WorkTask{
-		Filesize: filesize,
-		Filename: filepath,
+		Fs: filesize,
+		Fn: fp,
 	}
 
 	// Using a buffered channel to simulate active job queue
 	q <- t
 
-	log.Printf(
-		color.Red+"Job put into work queue, queue status len %d / cap %d"+color.Reset,
-		len(q), cap(q)
-	)
+	log.Printf(color.Red+"Job into working queue, queue status len %d / cap %d"+color.Reset,
+		len(q), cap(q))
 }
 
-func removeJob() {
+func dequeueJob() {
 	j := <-q
 
-	log.Printf("Removed job: size %d, path %s", j.Filesize, j.Filename)
+	log.Printf("Removed job: size %d, path %s", j.Fs, j.Fn)
 }
 
-func ProcessFile(filepath string) {
+func ProcessFile(fp string) {
 
 	if q == nil {
 		q = make(chan *WorkTask, MAX_CONCURRENT_JOBS)
 	}
 
-	filetype := getFileType(filepath)
+	ft := getFileType(fp)
 
 	// TBD: For research purpose, we only support zip format
 
-	if filetype == "application/zip" || filetype == "application/x-gzip" {
+	if ft == "application/zip" || ft == "application/x-gzip" {
 
-		openedFile, err := zip.OpenReader(filepath)
+		ar, err := zip.OpenReader(fp)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer openedFile.Close()
+		defer ar.Close()
 
-		for i, file := range openedFile.File {
+		for i, file := range ar.File {
 
-			compressedSize := file.CompressedSize64
-			uncompressedSize := file.UncompressedSize64
+			cSize := file.CompressedSize64
+			ucSize := file.UncompressedSize64
 
-			log.Printf(color.Blue + fmt.Sprintf(">>>>> File #%d \"%s\", size %d ==> %d",
-				i, file.Name, compressedSize, uncompressedSize) + color.Reset)
+			log.Printf(color.Blue + fmt.Sprintf("<<<<< File #%d \"%s\", size %d -> %d >>>>>",
+				i, file.Name, cSize, ucSize) + color.Reset)
 
-			log.Printf("Decompressing %s...", file.Name)
-
-			if file.FileInfo().IsDir() || file.CompressedSize64 == 0 {
-				// If target is a directory, just skip over it
+			if file.FileInfo().IsDir() || cSize == 0 {
+				// If target is a directory or just zero-length data, skip
 				continue
+
 			} else {
 
 				// Check to see if we have sufficient resource capacity to process
 				// the next member file. If not, block and wait.
 
-				checkCapacityAndSchedule(int(uncompressedSize), file.Name)
+				scheduleJob(int(ucSize), file.Name)
 
-				base := fp.Base(file.Name)
-				ext := fp.Ext(file.Name)
+				base := fpath.Base(file.Name)
+				ext := fpath.Ext(file.Name)
 				base = base[:len(base)-len(ext)]
 
 				tmpname := base + "*" + ext
@@ -106,21 +101,21 @@ func ProcessFile(filepath string) {
 
 				datPath := destFile.Name()
 
-				//Opening the file and copy it's contents
+				// Extract member file content and copy to tmp file
 
-				fileInArchive, err := file.Open()
+				mFile, err := file.Open()
 				if err != nil {
 					log.Fatal(err)
 				}
 
-				if _, err := io.Copy(destFile, fileInArchive); err != nil {
+				if _, err := io.Copy(destFile, mFile); err != nil {
 					log.Fatal(err)
 				}
 				destFile.Close()
-				fileInArchive.Close()
+				mFile.Close()
 
-				filetype2 := getFileType(datPath)
-				if filetype2 == "application/zip" || filetype2 == "application/x-gzip" {
+				ft = getFileType(datPath)
+				if ft == "application/zip" || ft == "application/x-gzip" {
 
 					log.Printf(color.Blue+"Encounted another ZIP file %s... recursively handle it"+color.Reset, datPath)
 					ProcessFile(datPath)
@@ -133,55 +128,68 @@ func ProcessFile(filepath string) {
 		}
 	}
 
+	wg.Wait()
 }
 
-func doSomethingWithFile(filepath string) {
+func doSomethingWithFile(fp string) {
 
-	// TBD: Do something useful here
+	wg.Add(1)
 
 	go func() {
-		log.Printf("Create a new goroutine to do something with the file \"%s\"...", filepath)
+		log.Printf("Create a new goroutine to do something with the file \"%s\"...", fp)
 
-		cleanUp(filepath)
-		removeJob()
+		defer wg.Done()
+
+		{
+			// TBD: Do something useful here. For the sake of this research, we just wait
+			// a random period to simulate some computationally/network intensive work.
+
+			r := rand.New(rand.NewSource(77))
+			msec := r.Intn(3000) // Max period of 3 seconds
+
+			time.Sleep(time.Duration(msec) * time.Millisecond)
+		}
+
+		cleanUp(fp)
+		dequeueJob()
 
 		log.Printf(color.Green+"After job removed from work queue, queue status len %d / cap %d"+color.Reset,
 			len(q), cap(q))
 	}()
 }
 
-func cleanUp(filepath string) {
+func cleanUp(fp string) {
 	if DELETE_TEMPS {
-		os.Remove(filepath)
+		os.Remove(fp)
 	}
 }
 
-func getFileType(filepath string) string {
+func getFileType(fp string) string {
 
-	file, err := os.Open(filepath)
+	f, err := os.Open(fp)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file.Close()
+	defer f.Close()
 
 	buff := make([]byte, 512)
-	_, err = file.Read(buff)
+	_, err = f.Read(buff)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	filetype := http.DetectContentType(buff)
-	log.Printf("File type for %s: %s\n", filepath, filetype)
+	ft := http.DetectContentType(buff)
+	log.Printf(color.Yellow+"File type for %s: %s"+color.Reset, fp, ft)
 
-	return filetype
+	return ft
 }
 
 func main() {
-	var filepath string
+	var fp string
 
-	flag.StringVar(&filepath, "path", "./test.zip", "Path to the file to process")
+	flag.StringVar(&fp, "path", "./test.zip", "Path to the file to process")
 
-	log.Printf("Opening file \"%s\"...", filepath)
+	log.Printf("Opening file \"%s\"...", fp)
 
-	ProcessFile(filepath)
+	ProcessFile(fp)
 }
