@@ -19,7 +19,7 @@ The code published in this repo was written as part of a PoC to confirm using re
 
 Decompression of archive (and subsequent processing) should be controlled based on available host resource so as to not starve user's application. The ceiling can be determined by available storage, CPU capacity, available memory, etc.
 
-Compressing large archives in one shot may unnecessarily block the client for too long a duration. For smoother scheduling, it might be better to decompose the archive file in phases or in small steps, while incurring some additional "disk" I/O operations. Given more computers have migrated off the traditional spinning media storage devices, the additional I/O overhead should be negligible compared to network I/O.
+Decompressing large archives in one shot may unnecessarily block the client for too long a duration. For smoother scheduling, it might be better to decompose the archive file in phases or in small steps, while incurring some additional "disk" I/O operations. Given more computers have migrated off the traditional spinning media storage devices, the additional I/O overhead should be negligible compared to network I/O.
 
 In the future, for certain computing environments, it might also be possible to fine-tuning performance by NICE value, cgroup, CPU usage capping, etc.
 
