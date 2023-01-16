@@ -126,6 +126,8 @@ func ProcessFile(fp string) {
 				}
 			}
 		}
+	} else {
+		log.Printf("%s is a normal file. No decompression handling needed.", fp)
 	}
 
 	wg.Wait()
@@ -188,6 +190,7 @@ func main() {
 	var fp string
 
 	flag.StringVar(&fp, "path", "./test.zip", "Path to the file to process")
+	flag.Parse()
 
 	log.Printf("Opening file \"%s\"...", fp)
 
