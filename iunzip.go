@@ -23,39 +23,33 @@ const (
 )
 
 var (
-	q  chan *WorkTask
+	q  chan int
 	wg sync.WaitGroup
 )
 
-type WorkTask struct {
-	Fs int
-	Fn string
-}
-
 func scheduleJob(filesize int, fp string) {
 
-	t := &WorkTask{
-		Fs: filesize,
-		Fn: fp,
-	}
-
 	// Using a buffered channel to simulate active job queue
-	q <- t
+	q <- 1
 
 	log.Printf(color.Red+"Job into working queue, queue status len %d / cap %d"+color.Reset,
 		len(q), cap(q))
 }
 
 func dequeueJob() {
-	j := <-q
+	x := <-q
+	if x != 1 {
+		log.Fatal("Unexpected value read from queue")
+	}
 
-	log.Printf("Removed job: size %d, path %s", j.Fs, j.Fn)
+	log.Printf(color.Green+"A job removed from queue, queue status len %d / cap %d"+color.Reset,
+		len(q), cap(q))
 }
 
 func ProcessFile(fp string) {
 
 	if q == nil {
-		q = make(chan *WorkTask, MAX_CONCURRENT_JOBS)
+		q = make(chan int, MAX_CONCURRENT_JOBS)
 	}
 
 	ft := getFileType(fp)
